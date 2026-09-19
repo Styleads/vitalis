@@ -90,19 +90,24 @@ def contention_penalty(
     Returns:
         float penalty >= 0.0.
     """
-    penalty = 0.0
     active_capacities = getattr(state, "active_capacities", None)
+    if active_capacities is None:
+        active_capacities = getattr(state, "total", None)
+
     free_counts = getattr(state, "free_counts", None)
+    if free_counts is None:
+        free_counts = getattr(state, "free", None)
 
     # If state is a dict or mock object, support dict-like access as fallback
     if active_capacities is None and isinstance(state, dict):
-        active_capacities = state.get("active_capacities", {})
+        active_capacities = state.get("active_capacities", state.get("total", {}))
     if free_counts is None and isinstance(state, dict):
-        free_counts = state.get("free_counts", {})
+        free_counts = state.get("free_counts", state.get("free", {}))
 
     if not active_capacities or not free_counts:
         return 0.0
 
+    penalty = 0.0
     for rtype, qty in required.items():
         if qty <= 0:
             continue

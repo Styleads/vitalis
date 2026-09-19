@@ -264,6 +264,40 @@ class TestStrategies(unittest.TestCase):
                     f"{strat.__name__} penalized a patient for having a longer predicted service time!",
                 )
 
+    def test_real_engine_types_compatibility(self) -> None:
+        """Verify strategies evaluate against Person A's real engine.types classes."""
+        try:
+            from engine.types import PatientView, StateView, ResourceType
+        except ImportError:
+            self.skipTest("engine.types not available")
+
+        pv = PatientView(
+            id=99,
+            urgency=1,
+            arrival_time=1000,
+            wait_s=300,
+            required={ResourceType.ICU_BED: 1, ResourceType.DOCTOR: 1},
+            predicted_service_time=3600,
+            remaining_service=3600,
+            arrival_mode="WALK_IN",
+            department="general",
+            interruptions=0,
+        )
+        sv = StateView(
+            clock=1300,
+            free={ResourceType.ICU_BED: 0, ResourceType.DOCTOR: 1},
+            total={ResourceType.ICU_BED: 2, ResourceType.DOCTOR: 4},
+            waiting=(),
+            in_treatment=3,
+            flags={"arrival_multiplier": 1.0},
+        )
+
+        for name, strat in STRATEGIES.items():
+            with self.subTest(strategy=name):
+                score = strat(pv, sv, 1300)
+                self.assertIsInstance(score, float)
+                self.assertGreater(score, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
