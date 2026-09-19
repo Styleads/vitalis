@@ -1,7 +1,7 @@
 """MedFlow - Scheduling Strategies Package (Person B).
 
 Exports scoring functions, registry of strategies, scoring primitives,
-and stats transformation/comparison helpers.
+stats transformation/comparison helpers, and parameter tuning harness.
 """
 
 from __future__ import annotations
@@ -19,16 +19,19 @@ from strategies.scoring import (
 from strategies.urgency_only import urgency_only
 from strategies.urgency_wait import urgency_wait
 from strategies.urgency_wait_utilization import urgency_wait_utilization
+from strategies.shortest_service_first import shortest_predicted_service_first
 from strategies.stats_display import to_display_stats, compare_strategies
+from strategies.tuning import make_custom_strategy, evaluate_parameters, grid_search
 
 # Strategy type signature: Callable[[PatientView, StateView, int], float]
 Strategy = Callable[[Any, Any, int], float]
 
-# Registry populated with the three core interchangeable strategies
+# Registry populated with standard and experimental strategies
 STRATEGIES: dict[str, Strategy] = {
     "urgency_only": urgency_only,
     "urgency_wait": urgency_wait,
     "urgency_wait_utilization": urgency_wait_utilization,
+    "shortest_predicted_service_first": shortest_predicted_service_first,
 }
 
 
@@ -61,8 +64,12 @@ __all__ = [
     "urgency_only",
     "urgency_wait",
     "urgency_wait_utilization",
+    "shortest_predicted_service_first",
     "to_display_stats",
     "compare_strategies",
+    "make_custom_strategy",
+    "evaluate_parameters",
+    "grid_search",
     "DEFAULT_WAIT_WEIGHT_PER_MIN",
     "DEFAULT_WAIT_CAP",
     "DEFAULT_CONTENTION_WEIGHT",
