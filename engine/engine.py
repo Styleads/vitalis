@@ -208,7 +208,8 @@ class Engine:
 
     def stats_raw(self) -> dict:
         """
-        Raw statistics.  available_s counts FREE+OCCUPIED time only (spec §12:
+        Raw statistics per spec §12.
+        available_s counts FREE+OCCUPIED time only (spec §12:
         FAILED and OFF time are excluded from the denominator).
         """
         all_patients = sorted(self._patients.values(), key=lambda p: p.id)
@@ -218,6 +219,9 @@ class Engine:
                 {
                     "id":               p.id,
                     "urgency":          p.urgency,
+                    "arrival":          p.arrival_time,
+                    "start":            p.start_time,
+                    "end":              p.end_time,
                     "arrival_time":     p.arrival_time,
                     "start_time":       p.start_time,
                     "end_time":         p.end_time,
@@ -240,8 +244,84 @@ class Engine:
         }
 
     def snapshot(self) -> dict:
-        """JSON-safe state snapshot. Implemented in Slice 5."""
-        raise NotImplementedError
+        """
+        JSON-safe state snapshot per spec §12.
+        All values are plain JSON-safe primitives (dict, list, int, str, float, bool, None).
+        Queue is ordered as the next allocation pass would sort: (-score, arrival_time, id).
+        Recent events shows at most the last 50 log dicts.
+        """
+        # 1. Waiting queue sorted by next allocation pass order: (-score, arrival_time, id)
+        waiting = [p for p in self._patients.values() if p.status == "WAITING"]
+        queue_items: list[dict] = []
+        if waiting:
+            state = self._make_state_view()
+            scored: list[tuple[float, Patient, PatientView]] = []
+            for p in waiting:
+                pv = self._make_patient_view(p, self.clock)
+                score = float(self._strategy(pv, state, self.clock))
+                scored.append((score, p, pv))
+            scored.sort(key=lambda item: (-item[0], item[1].arrival_time, item[1].id))
+            for score, p, pv in scored:
+                queue_items.append({
+                    "id": p.id,
+                    "urgency": p.urgency,
+                    "wait_s": pv.wait_s,
+                    "score": score,
+                    "required": {rt.value: count for rt, count in p.required.items()},
+                })
+
+        # 2. In-treatment patients
+        in_treatment_patients = sorted(
+            (p for p in self._patients.values() if p.status == "IN_TREATMENT"),
+            key=lambda p: p.id,
+        )
+        in_treatment_items: list[dict] = []
+        for p in in_treatment_patients:
+            ends_at = (p.segment_start if p.segment_start is not None else self.clock) + p.remaining_service
+            in_treatment_items.append({
+                "id": p.id,
+                "urgency": p.urgency,
+                "start_time": p.start_time,
+                "ends_at": ends_at,
+                "assigned": list(p.assigned),
+            })
+
+        # 3. Resources
+        resources_dict = {
+            rt.value: {
+                "total": self.resources._total.get(rt, 0),
+                "free": self.resources.free_count(rt),
+                "occupied": self.resources.occupied_count(rt),
+                "failed": self.resources.failed_count(rt),
+                "off": self.resources.off_count(rt),
+            }
+            for rt in ResourceType
+        }
+
+        # 4. Strategy name
+        strategy_name = getattr(self._strategy, "__name__", str(self._strategy))
+
+        # 5. Recent events (deep copy of rolling buffer)
+        recent_events = [
+            {
+                k: (list(v) if isinstance(v, list) else v)
+                for k, v in evt.items()
+            }
+            for evt in self._recent_events
+        ]
+
+        return {
+            "clock": self.clock,
+            "strategy_name": strategy_name,
+            "hol_policy": self.config.hol_policy,
+            "queue": queue_items,
+            "in_treatment": in_treatment_items,
+            "resources": resources_dict,
+            "flags": {
+                "arrival_multiplier": float(self.flags.get("arrival_multiplier", 1.0)),
+            },
+            "recent_events": recent_events,
+        }
 
     # ------------------------------------------------------------------
     # Semi-private helpers (stable API for tests)

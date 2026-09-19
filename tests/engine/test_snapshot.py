@@ -276,3 +276,108 @@ def test_snapshot_recent_events_capped_at_50() -> None:
     assert len(snap["recent_events"]) <= 50, (
         f"recent_events must be capped at 50; got {len(snap['recent_events'])}"
     )
+
+
+# ---------------------------------------------------------------------------
+# 4. Hand-computed utilization scenario (Spec §12)
+# ---------------------------------------------------------------------------
+
+def test_hand_computed_utilization_scenario() -> None:
+    """
+    Spec §12 stats_raw():
+      Utilization = busy_s / available_s (available excludes FAILED/OFF).
+
+    Hand-calculated tiny scenario:
+      Pool: 2 BED, 1 DOCTOR.
+      p1 arrives t=0, required={BED: 1, DOCTOR: 1}, service_time=100.
+      p2 arrives t=0, required={BED: 1}, service_time=200.
+      BED 2 fails at t=50 for 100s (recovers at t=150).
+      Simulation runs until t=300.
+
+    Timeline breakdown:
+      - [0, 50) dt=50:
+          Both allocated (p1: BED 1, DOCTOR 1; p2: BED 2).
+          BED:    occupied=2, active=2 -> busy += 100, avail += 100
+          DOCTOR: occupied=1, active=1 -> busy += 50,  avail += 50
+      - [50, 100) dt=50:
+          BED 2 fails; P-FAIL on p2 (releases BED 2, returns to WAITING).
+          p2 remaining_service = 200 - 50 = 150.
+          BED:    occupied=1 (p1), active=1 (BED 1) -> busy += 50, avail += 50
+          DOCTOR: occupied=1 (p1), active=1         -> busy += 50, avail += 50
+      - [100, 150) dt=50:
+          p1 finishes at t=100. BED 1 and DOCTOR become FREE.
+          Allocation pass: p2 re-reserves BED 1! (remaining=150, finishes at t=250).
+          BED:    occupied=1 (p2), active=1 (BED 1; BED 2 FAILED) -> busy += 50, avail += 50
+          DOCTOR: occupied=0, active=1                            -> busy += 0,  avail += 50
+      - [150, 250) dt=100:
+          BED 2 recovers at t=150 (FREE). Both beds now active.
+          BED:    occupied=1 (p2), active=2 (BED 1 occ, BED 2 free) -> busy += 100, avail += 200
+          DOCTOR: occupied=0, active=1                              -> busy += 0,   avail += 100
+      - [250, 300) dt=50:
+          p2 finishes at t=250. All resources idle until t=300.
+          BED:    occupied=0, active=2 -> busy += 0, avail += 100
+          DOCTOR: occupied=0, active=1 -> busy += 0, avail += 50
+
+    Expected exact totals over [0, 300]:
+      BED:
+        busy_s      = 100 + 50 + 50 + 100 + 0 = 300
+        available_s = 100 + 50 + 50 + 200 + 100 = 500
+        utilization = 300 / 500 = 0.60
+      DOCTOR:
+        busy_s      = 50 + 50 + 0 + 0 + 0 = 100
+        available_s = 50 + 50 + 50 + 100 + 50 = 300
+        utilization = 100 / 300 = 1/3
+    """
+    config = EngineConfig(
+        capacities={
+            ResourceType.BED: 2,
+            ResourceType.DOCTOR: 1,
+            ResourceType.ICU_BED: 0,
+            ResourceType.OR: 0,
+            ResourceType.NURSE: 0,
+            ResourceType.AMBULANCE: 0,
+        },
+        bundles={1: {ResourceType.BED: 1, ResourceType.DOCTOR: 1}},
+        or_probability={1: 0.0},
+        mean_service_s={1: 100},
+        urgency_mix={1: 1.0},
+        base_arrival_rate=1.0,
+        hol_policy="BACKFILL",
+        debug_invariants=True,
+    )
+    p1 = _patient(1, arrival=0, urgency=1, required={ResourceType.BED: 1, ResourceType.DOCTOR: 1}, service_time=100)
+    p2 = _patient(2, arrival=0, urgency=1, required={ResourceType.BED: 1}, service_time=200)
+
+    # Unit 2 is BED 2 (since BEDs are units 1 and 2 in enum declaration order)
+    scripted = [(50, "fail", (2, 100))]
+    eng = Engine(config, [p1, p2], fifo_strategy, seed=42, scripted=scripted)
+    eng.run_until(300)
+
+    stats = eng.stats_raw()
+
+    assert stats["clock"] == 300
+    assert stats["busy_s"]["BED"] == 300, (
+        f"Expected BED busy_s=300, got {stats['busy_s']['BED']}"
+    )
+    assert stats["available_s"]["BED"] == 500, (
+        f"Expected BED available_s=500 (excluding 100s failed time), got {stats['available_s']['BED']}"
+    )
+    assert stats["busy_s"]["DOCTOR"] == 100, (
+        f"Expected DOCTOR busy_s=100, got {stats['busy_s']['DOCTOR']}"
+    )
+    assert stats["available_s"]["DOCTOR"] == 300, (
+        f"Expected DOCTOR available_s=300, got {stats['available_s']['DOCTOR']}"
+    )
+
+    bed_utilization = stats["busy_s"]["BED"] / stats["available_s"]["BED"]
+    doc_utilization = stats["busy_s"]["DOCTOR"] / stats["available_s"]["DOCTOR"]
+
+    assert abs(bed_utilization - 0.60) < 1e-6, f"Expected BED utilization 0.60, got {bed_utilization}"
+    assert abs(doc_utilization - (1.0 / 3.0)) < 1e-6, f"Expected DOCTOR utilization 1/3, got {doc_utilization}"
+
+    # Verify counts
+    assert stats["counts"]["arrived"] == 2
+    assert stats["counts"]["treated"] == 2
+    assert stats["counts"]["waiting"] == 0
+    assert stats["counts"]["in_treatment"] == 0
+    assert stats["counts"]["interrupted"] == 1
