@@ -106,12 +106,13 @@ def to_display_stats(raw: Mapping[str, Any]) -> dict[str, Any]:
     valid_utilization_vals: list[float] = []
     for rtype, avail in available_s.items():
         busy = busy_s.get(rtype, 0)
+        key_str = rtype.name if hasattr(rtype, "name") else str(rtype)
         if avail > 0:
             pct = round(min(100.0, (busy / avail) * 100.0), 2)
-            utilization_pct[rtype] = pct
+            utilization_pct[key_str] = pct
             valid_utilization_vals.append(pct)
         else:
-            utilization_pct[rtype] = 0.0
+            utilization_pct[key_str] = 0.0
 
     avg_utilization_pct = (
         round(sum(valid_utilization_vals) / len(valid_utilization_vals), 2)
