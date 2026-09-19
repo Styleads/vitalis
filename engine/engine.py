@@ -211,8 +211,11 @@ class Engine:
         Raw statistics per spec §12.
         available_s counts FREE+OCCUPIED time only (spec §12:
         FAILED and OFF time are excluded from the denominator).
+        Only patients who have actually arrived by the current simulation
+        clock are included in arrived statistics and patient records.
         """
         all_patients = sorted(self._patients.values(), key=lambda p: p.id)
+        arrived = [p for p in all_patients if p.arrival_time <= self.clock]
         return {
             "clock":       self.clock,
             "patients": [
@@ -230,16 +233,16 @@ class Engine:
                     "interruptions":    p.interruptions,
                     "status":           p.status,
                 }
-                for p in all_patients
+                for p in arrived
             ],
             "busy_s":      {rt.value: self._busy_s[rt]      for rt in ResourceType},
             "available_s": {rt.value: self._available_s[rt] for rt in ResourceType},
             "counts": {
-                "arrived":      len(self._patients),
-                "treated":      sum(1 for p in all_patients if p.status == "DISCHARGED"),
-                "waiting":      sum(1 for p in all_patients if p.status == "WAITING"),
-                "in_treatment": sum(1 for p in all_patients if p.status == "IN_TREATMENT"),
-                "interrupted":  sum(p.interruptions for p in all_patients),
+                "arrived":      len(arrived),
+                "treated":      sum(1 for p in arrived if p.status == "DISCHARGED"),
+                "waiting":      sum(1 for p in arrived if p.status == "WAITING"),
+                "in_treatment": sum(1 for p in arrived if p.status == "IN_TREATMENT"),
+                "interrupted":  sum(p.interruptions for p in arrived),
             },
         }
 
@@ -366,7 +369,10 @@ class Engine:
         The pool is therefore always consistent between calls; no unit can ever
         be OCCUPIED by two patients simultaneously.
         """
-        waiting = [p for p in self._patients.values() if p.status == "WAITING"]
+        waiting = [
+            p for p in self._patients.values()
+            if p.status == "WAITING" and p.arrival_time <= self.clock
+        ]
         if not waiting:
             return
 
@@ -439,7 +445,7 @@ class Engine:
         waiting_pvs = tuple(
             self._make_patient_view(p, self.clock)
             for p in self._patients.values()
-            if p.status == "WAITING"
+            if p.status == "WAITING" and p.arrival_time <= self.clock
         )
         in_treatment_count = sum(
             1 for p in self._patients.values() if p.status == "IN_TREATMENT"

@@ -126,18 +126,21 @@ def try_reserve(
         if count == 0:
             continue                        # this type not needed
 
-        # Collect FREE units of this type, lowest id first.
-        free_ids: list[int] = sorted(
-            uid for uid, u in pool.units.items()
-            if u.type == rtype and u.status == "FREE"
-        )
+        # Collect up to `count` lowest-id FREE units of this type.
+        # pool.units is ordered by unit id ascending.
+        matched: list[int] = []
+        for uid, u in pool.units.items():
+            if u.type == rtype and u.status == "FREE":
+                matched.append(uid)
+                if len(matched) == count:
+                    break
 
-        if len(free_ids) < count:
+        if len(matched) < count:
             # Not enough free units of this type — fail atomically.
             # candidates list is discarded; no unit has been touched yet.
             return None
 
-        candidates.extend(free_ids[:count])
+        candidates.extend(matched)
 
     # Phase 2: commit — all types were satisfiable.
     for uid in candidates:
