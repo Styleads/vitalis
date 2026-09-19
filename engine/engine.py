@@ -490,12 +490,54 @@ class Engine:
     def _handle_arrival(self, patient_id: int) -> None:
         """
         Process an ARRIVAL event.
-        Hook application (triage_fn, los_fn) is deferred to Slice 5.
+        Spec §10: apply triage_fn and los_fn once at ARRIVAL.
+        If a hook raises or returns an invalid value, log HOOK_ERROR,
+        keep the generator's value, and continue.
         """
         patient = self._patients.get(patient_id)
         if patient is None:
             return
-        # Hooks are applied here in Slice 5.
+
+        if self._triage_fn is not None:
+            try:
+                new_urgency = self._triage_fn(patient)
+                if isinstance(new_urgency, int) and not isinstance(new_urgency, bool) and 1 <= new_urgency <= 5:
+                    patient.urgency = new_urgency
+                else:
+                    self._log({
+                        "t":          self.clock,
+                        "type":       "HOOK_ERROR",
+                        "patient_id": patient_id,
+                        "note":       f"triage_fn returned invalid urgency: {new_urgency!r}",
+                    })
+            except Exception as e:
+                self._log({
+                    "t":          self.clock,
+                    "type":       "HOOK_ERROR",
+                    "patient_id": patient_id,
+                    "note":       f"triage_fn raised: {e}",
+                })
+
+        if self._los_fn is not None:
+            try:
+                predicted = self._los_fn(patient)
+                if isinstance(predicted, int) and not isinstance(predicted, bool) and predicted >= 0:
+                    patient.predicted_service_time = predicted
+                else:
+                    self._log({
+                        "t":          self.clock,
+                        "type":       "HOOK_ERROR",
+                        "patient_id": patient_id,
+                        "note":       f"los_fn returned invalid predicted_service_time: {predicted!r}",
+                    })
+            except Exception as e:
+                self._log({
+                    "t":          self.clock,
+                    "type":       "HOOK_ERROR",
+                    "patient_id": patient_id,
+                    "note":       f"los_fn raised: {e}",
+                })
+
         self._log({
             "t":          self.clock,
             "type":       "ARRIVAL",
