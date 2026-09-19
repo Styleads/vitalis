@@ -66,9 +66,9 @@ def test_scripted_and_live_surges_produce_identical_arrivals() -> None:
     # --- Run B: live inject_surge ---
     arrivals_b = generate_arrivals(seed=seed, config=config, horizon_s=horizon_s)
     eng_live = Engine(config, arrivals_b, fifo_strategy, seed=seed, scripted=[])
-    # Advance to just before the surge timestamp
-    eng_live.run_until(surge_t - 1)
-    # Fire the live hook, then advance to surge_t to process it
+    # Advance to the surge timestamp
+    eng_live.run_until(surge_t)
+    # Fire the live hook at surge_t, then process it immediately via run_until(surge_t)
     eng_live.inject_surge(multiplier, duration)
     # Collect all remaining arrivals after the surge fires
     eng_live.run_until(surge_t)
@@ -104,7 +104,7 @@ def test_scripted_and_live_surges_same_patient_count() -> None:
     eng_l = Engine(config, arrivals_b, fifo_strategy, seed=seed, scripted=[])
 
     all_a = _run_and_collect_arrivals(eng_s)
-    eng_l.run_until(1799)
+    eng_l.run_until(1800)
     eng_l.inject_surge(3.0, 900)
     eng_l.run_until(1800)
     all_l = _run_and_collect_arrivals(eng_l)

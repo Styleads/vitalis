@@ -168,7 +168,7 @@ def test_events_pushed_at_t_processed_in_same_step() -> None:
         or_probability={1: 0.0},
         mean_service_s={1: 100},
         urgency_mix={1: 1.0},
-        base_arrival_rate=30.0,   # high rate → surge produces arrivals at t=0
+        base_arrival_rate=10000.0,   # high rate → surge produces arrivals at t=0
         hol_policy="BACKFILL",
         debug_invariants=True,
     )

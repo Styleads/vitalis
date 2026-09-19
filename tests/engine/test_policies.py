@@ -148,15 +148,12 @@ def test_capacity_reduction_sets_pending_off_not_interrupting() -> None:
     p1 = _patient(1, 0, {ResourceType.BED: 1, ResourceType.DOCTOR: 1}, service_time=300)
     p2 = _patient(2, 0, {ResourceType.BED: 1, ResourceType.DOCTOR: 1}, service_time=300)
 
-    # Capacity CHANGE at t=0 (during allocation), reducing BED to 1
-    scripted = [(0, "capacity", (ResourceType.BED, 1))]
+    # Capacity CHANGE at t=1 (while both patients are in treatment), reducing BED to 1
+    scripted = [(1, "capacity", (ResourceType.BED, 1))]
     eng = Engine(config, [p1, p2], fifo_strategy, seed=42, scripted=scripted)
 
-    # Step at t=0: ARRIVALs at rank 3, but CAPACITY_CHANGE at rank 1 fires first.
-    # After the change: one BED must go off.  Then patients arrive and allocation runs.
-    # But p1 and p2 arrived at t=0, so they need to be in the system first.
-    # Two separate steps may be needed depending on scripted timing; just run a few.
-    eng.run_until(0)
+    # Step at t=0 allocates p1 and p2; step at t=1 processes CAPACITY_CHANGE
+    eng.run_until(1)
 
     # p1 and p2 must be allocated (both were WAITING at t=0 when BEDs were still FREE)
     # After capacity reduction the occupied BED (highest id) should have pending_off=True

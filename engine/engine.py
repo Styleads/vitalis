@@ -33,12 +33,12 @@ Strategy = Callable[[PatientView, StateView, int], float]
 # Spec §5: kind_rank determines ordering when events share a timestamp.
 _KIND_RANK: dict[str, int] = {
     "TREATMENT_DONE":  0,
+    "RECOVERY":        0,
+    "FAILURE":         1,
     "CAPACITY_CHANGE": 1,
     "SURGE_START":     2,
     "SURGE_END":       2,
     "ARRIVAL":         3,
-    "FAILURE":         3,
-    "RECOVERY":        3,
 }
 
 # Map scripted action names to event kinds
@@ -170,11 +170,8 @@ class Engine:
 
     def inject_surge(self, multiplier: float, duration_s: int) -> None:
         """
-        Enqueue SURGE_START at current clock.
-
-        Slice 3 scope: only the minimum needed so that the ordering test
-        can verify 'events pushed at t during step(t) are processed in the
-        same step'.  Full Poisson surge generation is implemented in Slice 4.
+        Spec §9: enqueue SURGE_START at current clock.
+        Applies on the next step() or run_until().
         """
         self._push_event(
             self.clock, _KIND_RANK["SURGE_START"],
@@ -182,12 +179,24 @@ class Engine:
         )
 
     def set_capacity(self, rtype: ResourceType, n: int) -> None:
-        """Enqueue CAPACITY_CHANGE. Implemented in Slice 4."""
-        raise NotImplementedError
+        """
+        Spec §9: enqueue CAPACITY_CHANGE at current clock.
+        Applies on the next step() or run_until().
+        """
+        self._push_event(
+            self.clock, _KIND_RANK["CAPACITY_CHANGE"],
+            "CAPACITY_CHANGE", (rtype, n),
+        )
 
     def fail_resource(self, rid: int, duration_s: int) -> None:
-        """Enqueue FAILURE. Implemented in Slice 4."""
-        raise NotImplementedError
+        """
+        Spec §9: enqueue FAILURE at current clock.
+        Applies on the next step() or run_until().
+        """
+        self._push_event(
+            self.clock, _KIND_RANK["FAILURE"],
+            "FAILURE", (rid, duration_s),
+        )
 
     def set_strategy(self, s: Strategy) -> None:
         """Replace the strategy; takes effect at the next allocation pass."""
@@ -390,8 +399,12 @@ class Engine:
             self._handle_surge_start(event.payload[0], event.payload[1])
         elif event.kind == "SURGE_END":
             self._handle_surge_end()
-        elif event.kind in ("FAILURE", "RECOVERY", "CAPACITY_CHANGE"):
-            pass   # no-op stubs — Slice 4
+        elif event.kind == "CAPACITY_CHANGE":
+            self._handle_capacity_change(event.payload[0], event.payload[1])
+        elif event.kind == "FAILURE":
+            self._handle_failure(event.payload[0], event.payload[1])
+        elif event.kind == "RECOVERY":
+            self._handle_recovery(event.payload[0], event.payload[1])
         # Unknown kinds are silently ignored.
 
     def _handle_arrival(self, patient_id: int) -> None:
@@ -435,28 +448,205 @@ class Engine:
 
     def _handle_surge_start(self, multiplier: float, duration_s: int) -> None:
         """
-        Slice 3 minimal: push exactly one patient arrival at the current clock
-        to demonstrate that events pushed at t during step(t) are processed in
-        the same step.  Full Poisson surge generation is in Slice 4.
+        Spec §9: set arrival_multiplier, generate extra Poisson arrivals
+        from now to now + duration_s using random.Random(f"{seed}:surge:{k}"),
+        push ARRIVAL events, and push SURGE_END at now + duration_s.
         """
-        surge_rng = _random_stdlib.Random(f"s{self._seed}:{self._surge_count}")
-        self._surge_count += 1
-        patient = make_patient(surge_rng, self._next_patient_id, self.clock, self.config)
-        self._next_patient_id += 1
-        self._patients[patient.id] = patient
-        self.arrivals.append(patient)
-        # Push ARRIVAL at the current clock — processed in the same step() call.
-        self._push_event(self.clock, _KIND_RANK["ARRIVAL"], "ARRIVAL", (patient.id,))
+        self.flags["arrival_multiplier"] = multiplier
         self._log({
             "t":          self.clock,
             "type":       "SURGE_START",
             "multiplier": multiplier,
             "duration_s": duration_s,
         })
+        self._push_event(
+            self.clock + duration_s, _KIND_RANK["SURGE_END"],
+            "SURGE_END", (),
+        )
+
+        if multiplier <= 1.0 or duration_s <= 0:
+            return
+
+        rate = (multiplier - 1.0) * self.config.base_arrival_rate / 3600.0
+        surge_rng = _random_stdlib.Random(f"{self._seed}:surge:{self._surge_count}")
+        self._surge_count += 1
+
+        t_float = float(self.clock)
+        while True:
+            inter = surge_rng.expovariate(rate)
+            t_float += inter
+            if t_float >= self.clock + duration_s:
+                break
+            arrival_time = int(t_float)
+            patient = make_patient(surge_rng, self._next_patient_id, arrival_time, self.config)
+            self._next_patient_id += 1
+            self._patients[patient.id] = patient
+            self.arrivals.append(patient)
+            self._push_event(arrival_time, _KIND_RANK["ARRIVAL"], "ARRIVAL", (patient.id,))
 
     def _handle_surge_end(self) -> None:
-        """Full behavior in Slice 4."""
+        """Spec §9: reset arrival_multiplier flag and log."""
+        self.flags["arrival_multiplier"] = 1.0
         self._log({"t": self.clock, "type": "SURGE_END"})
+
+    def _handle_capacity_change(self, rtype: ResourceType, n: int) -> None:
+        """
+        Spec §9:
+        n clamped to [0, total units of that type].
+        Reducing: FREE units become OFF (highest ids first);
+        if more must go, OCCUPIED units get pending_off = True (highest ids first)
+        and go OFF on release. Reductions never interrupt treatment.
+        Increasing: OFF units return to FREE (lowest ids first),
+        clear pending_off on occupied units first, then allocation runs.
+        """
+        total = self.resources._total[rtype]
+        target_n = max(0, min(n, total))
+
+        effective_active = [
+            u for u in self.resources.units.values()
+            if u.type == rtype and (u.status == "FREE" or (u.status == "OCCUPIED" and not u.pending_off))
+        ]
+        current_active_count = len(effective_active)
+
+        if target_n < current_active_count:
+            to_reduce = current_active_count - target_n
+            # 1. FREE units become OFF (highest ids first)
+            free_units = sorted(
+                (u for u in self.resources.units.values() if u.type == rtype and u.status == "FREE"),
+                key=lambda u: u.id,
+                reverse=True,
+            )
+            for u in free_units:
+                if to_reduce == 0:
+                    break
+                u.status = "OFF"
+                to_reduce -= 1
+
+            # 2. If more must go, OCCUPIED units get pending_off = True (highest ids first)
+            if to_reduce > 0:
+                occ_units = sorted(
+                    (u for u in self.resources.units.values() if u.type == rtype and u.status == "OCCUPIED" and not u.pending_off),
+                    key=lambda u: u.id,
+                    reverse=True,
+                )
+                for u in occ_units:
+                    if to_reduce == 0:
+                        break
+                    u.pending_off = True
+                    to_reduce -= 1
+
+        elif target_n > current_active_count:
+            to_increase = target_n - current_active_count
+            # 1. Clear pending_off on occupied units first (lowest ids first)
+            pending_occ = sorted(
+                (u for u in self.resources.units.values() if u.type == rtype and u.status == "OCCUPIED" and u.pending_off),
+                key=lambda u: u.id,
+            )
+            for u in pending_occ:
+                if to_increase == 0:
+                    break
+                u.pending_off = False
+                to_increase -= 1
+
+            # 2. OFF units return to FREE (lowest ids first)
+            if to_increase > 0:
+                off_units = sorted(
+                    (u for u in self.resources.units.values() if u.type == rtype and u.status == "OFF"),
+                    key=lambda u: u.id,
+                )
+                for u in off_units:
+                    if to_increase == 0:
+                        break
+                    u.status = "FREE"
+                    to_increase -= 1
+
+        self._log({
+            "t":     self.clock,
+            "type":  "CAPACITY_CHANGE",
+            "note":  f"{rtype.value} -> {target_n}",
+        })
+
+    def _handle_failure(self, rid: int, duration_s: int) -> None:
+        """
+        Spec §9:
+        enqueues FAILURE; schedules RECOVERY at now + duration_s.
+        Ignored (and logged) if the unit is already FAILED or OFF.
+        If the unit was OCCUPIED, apply P-FAIL.
+        """
+        unit = self.resources.units.get(rid)
+        if unit is None:
+            return
+
+        if unit.status in ("FAILED", "OFF"):
+            self._log({
+                "t":     self.clock,
+                "type":  "FAILURE",
+                "units": [rid],
+                "note":  f"Unit {rid} is already {unit.status}; failure ignored",
+            })
+            return
+
+        was_pending_off = unit.pending_off
+        unit.pending_off = False
+
+        if unit.status == "OCCUPIED":
+            patient = self._patients[unit.owner]
+            elapsed = self.clock - (patient.segment_start if patient.segment_start is not None else self.clock)
+            patient.remaining_service = max(0, patient.remaining_service - elapsed)
+            patient.interruptions += 1
+            patient.token += 1
+            patient.status = "WAITING"
+            held_units = list(patient.assigned)
+            patient.assigned = []
+
+            for uid in held_units:
+                u = self.resources.units[uid]
+                if uid == rid:
+                    u.status = "FAILED"
+                    u.owner = None
+                    u.pending_off = False
+                else:
+                    release(u)
+
+            self._log({
+                "t":          self.clock,
+                "type":       "INTERRUPTED",
+                "patient_id": patient.id,
+                "units":      held_units,
+            })
+        else:
+            unit.status = "FAILED"
+
+        self._push_event(
+            self.clock + duration_s, _KIND_RANK["RECOVERY"],
+            "RECOVERY", (rid, was_pending_off),
+        )
+        self._log({
+            "t":     self.clock,
+            "type":  "FAILURE",
+            "units": [rid],
+        })
+
+    def _handle_recovery(self, rid: int, was_pending_off: bool) -> None:
+        """
+        Spec §9: On RECOVERY: status becomes FREE (or OFF if pending_off).
+        """
+        unit = self.resources.units.get(rid)
+        if unit is None or unit.status != "FAILED":
+            return
+
+        if was_pending_off:
+            unit.status = "OFF"
+            unit.pending_off = False
+        else:
+            unit.status = "FREE"
+            unit.pending_off = False
+
+        self._log({
+            "t":     self.clock,
+            "type":  "RECOVERY",
+            "units": [rid],
+        })
 
     # ------------------------------------------------------------------
     # Internal helpers
