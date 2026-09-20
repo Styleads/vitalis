@@ -13,6 +13,8 @@ venv/
 # Environment and sensitive docs
 AGENT.md
 .env
+.env.local
+.env.*.local
 
 # OS files
 .DS_Store
@@ -20,4 +22,6 @@ Thumbs.db
 
 # Node / Frontend artifacts
 node_modules/
+dist/
+frontend/dist/
 *.tsbuildinfo

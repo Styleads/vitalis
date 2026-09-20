@@ -8,11 +8,11 @@ import type {
 
 const meta = import.meta as unknown as { env?: Record<string, string | undefined> };
 
-const API_BASE_URL =
-  meta.env?.VITE_API_URL || "http://localhost:8000";
+const rawApiUrl = (meta.env?.VITE_API_URL || "http://localhost:8000").trim();
+const API_BASE_URL = rawApiUrl.replace(/\/+$/, "");
 
-const WS_BASE_URL =
-  meta.env?.VITE_WS_URL || "ws://localhost:8000/ws/simulation";
+const rawWsUrl = (meta.env?.VITE_WS_URL || "ws://localhost:8000/ws/simulation").trim();
+const WS_BASE_URL = rawWsUrl.replace(/\/+$/, "");
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE_URL}${path}`;
