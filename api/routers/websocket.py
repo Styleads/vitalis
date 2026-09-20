@@ -25,6 +25,8 @@ async def simulation_websocket(websocket: WebSocket):
     try:
         initial_snapshot = sim_service.get_snapshot()
         await websocket.send_json({"type": "state", "data": initial_snapshot})
+        initial_stats = sim_service.get_stats()
+        await websocket.send_json({"type": "stats", "data": initial_stats})
     except Exception as e:
         logger.warning("Failed to send initial snapshot to WS client: %s", e)
 

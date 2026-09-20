@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from engine import (
     Engine,
@@ -263,8 +263,10 @@ class SimulationService:
                     target_time = self.engine.clock + max(1, step_delta)
                     self.engine.run_until(target_time)
                     snapshot = self.engine.snapshot()
+                    stats = self.get_stats()
 
                 await manager.broadcast_state(snapshot)
+                await manager.broadcast({"type": "stats", "data": stats})
         except asyncio.CancelledError:
             logger.info("Simulation tick loop cancelled.")
         except Exception as e:

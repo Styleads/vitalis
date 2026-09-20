@@ -17,3 +17,7 @@ AGENT.md
 # OS files
 .DS_Store
 Thumbs.db
+
+# Node / Frontend artifacts
+node_modules/
+*.tsbuildinfo

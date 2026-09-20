@@ -10,12 +10,12 @@ export const initialResources: Resource[] = [
 ];
 
 export const initialPatients: Patient[] = [
-  { id: "P-1042", urgency: 5, wait: 4, resources: ["ICU Bed", "Doctor"], score: 96, arrival: "10:42", status: "Waiting" },
-  { id: "P-1038", urgency: 4, wait: 12, resources: ["Bed", "Nurse"], score: 82, arrival: "10:34", status: "Waiting" },
-  { id: "P-1045", urgency: 3, wait: 18, resources: ["OR", "Doctor"], score: 76, arrival: "10:28", status: "Waiting" },
-  { id: "P-1031", urgency: 2, wait: 25, resources: ["Bed", "Nurse"], score: 64, arrival: "10:21", status: "Waiting" },
-  { id: "P-1048", urgency: 5, wait: 7, resources: ["ICU Bed", "Nurse"], score: 92, arrival: "10:39", status: "Waiting" },
-  { id: "P-1027", urgency: 1, wait: 31, resources: ["Bed"], score: 48, arrival: "10:15", status: "Waiting" },
+  { id: "P-1042", urgency: 5, wait: 4, wait_s: 240, resources: ["ICU Bed", "Doctor"], score: 96, arrival: "10:42", status: "Waiting", isArrived: true, eta_s: 0 },
+  { id: "P-1038", urgency: 4, wait: 12, wait_s: 720, resources: ["Bed", "Nurse"], score: 82, arrival: "10:34", status: "Waiting", isArrived: true, eta_s: 0 },
+  { id: "P-1045", urgency: 3, wait: 18, wait_s: 1080, resources: ["OR", "Doctor"], score: 76, arrival: "10:28", status: "Waiting", isArrived: true, eta_s: 0 },
+  { id: "P-1031", urgency: 2, wait: 25, wait_s: 1500, resources: ["Bed", "Nurse"], score: 64, arrival: "10:21", status: "Waiting", isArrived: true, eta_s: 0 },
+  { id: "P-1048", urgency: 5, wait: 7, wait_s: 420, resources: ["ICU Bed", "Nurse"], score: 92, arrival: "10:39", status: "Waiting", isArrived: true, eta_s: 0 },
+  { id: "P-1027", urgency: 1, wait: 31, wait_s: 1860, resources: ["Bed"], score: 48, arrival: "10:15", status: "Waiting", isArrived: true, eta_s: 0 },
 ];
 
 export const treatmentPatients: TreatmentPatient[] = [

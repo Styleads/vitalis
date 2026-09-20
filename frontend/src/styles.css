@@ -260,3 +260,74 @@ footer span { margin-left:4px; }
   .hero-copy h1 { font-size:33px; }
   .notification-popover { right:8px; width:calc(100vw - 30px); }
 }
+
+.connection-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 20px;
+  background: #f1f5f4;
+  color: #647a7d;
+  border: 1px solid var(--line);
+}
+.connection-badge.connected {
+  background: #eaf6f0;
+  color: #2e7d5b;
+  border-color: #c4e4d4;
+}
+.connection-badge.connecting {
+  background: #fff8e8;
+  color: #a8711e;
+  border-color: #f7e0b5;
+}
+.connection-badge.disconnected {
+  background: #fdf0ed;
+  color: #b74834;
+  border-color: #f3cbc3;
+}
+.badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.queue-status-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.queue-status-tag.waiting {
+  background: #eaf6f0;
+  color: #277956;
+}
+.queue-status-tag.inbound {
+  background: #f1f4f5;
+  color: #61777b;
+}
+.queue-filter-tabs {
+  display: flex;
+  gap: 6px;
+}
+.queue-tab {
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.queue-tab.active {
+  background: #eaf5f3;
+  color: var(--teal);
+  border-color: #bddbd5;
+  font-weight: 700;
+}
