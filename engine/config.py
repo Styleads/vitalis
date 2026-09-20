@@ -70,7 +70,7 @@ def default_config() -> EngineConfig:
             5: 20 * 60,     # 20 min
         },
         urgency_mix={1: 0.05, 2: 0.15, 3: 0.30, 4: 0.30, 5: 0.20},
-        base_arrival_rate=10.0,   # patients per hour — placeholder
+        base_arrival_rate=3.5,   # patients per hour — placeholder
         hol_policy="BACKFILL",
         debug_invariants=False,
     )
