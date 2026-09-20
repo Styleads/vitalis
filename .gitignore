@@ -1,0 +1,19 @@
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.venv/
+venv/
+
+# Environment and sensitive docs
+AGENT.md
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
