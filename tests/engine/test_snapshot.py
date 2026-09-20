@@ -381,3 +381,71 @@ def test_hand_computed_utilization_scenario() -> None:
     assert stats["counts"]["waiting"] == 0
     assert stats["counts"]["in_treatment"] == 0
     assert stats["counts"]["interrupted"] == 1
+
+
+# ---------------------------------------------------------------------------
+# 5. Future arrivals handling (regression test for CLI / stats_raw)
+# ---------------------------------------------------------------------------
+
+def test_stats_raw_future_arrivals_not_counted_as_arrived_or_waiting() -> None:
+    """
+    When the simulation clock has not reached the arrival time of some
+    pre-generated patients, stats_raw() must:
+      1. Only count patients whose arrival_time <= clock as 'arrived'.
+      2. Only count arrived patients with status == 'WAITING' as 'waiting'.
+      3. Only include arrived patients in stats_raw()['patients'].
+      4. Ensure wait times for all arrived patients are non-negative.
+    """
+    config = EngineConfig(
+        capacities={
+            ResourceType.BED: 1,
+            ResourceType.DOCTOR: 1,
+            ResourceType.ICU_BED: 0,
+            ResourceType.OR: 0,
+            ResourceType.NURSE: 0,
+            ResourceType.AMBULANCE: 0,
+        },
+        bundles={1: {ResourceType.BED: 1, ResourceType.DOCTOR: 1}},
+        or_probability={1: 0.0},
+        mean_service_s={1: 100},
+        urgency_mix={1: 1.0},
+        base_arrival_rate=1.0,
+        hol_policy="BACKFILL",
+        debug_invariants=True,
+    )
+    # p1 arrives at 0 (service_time=100 -> finishes at 100)
+    p1 = _patient(1, arrival=0, urgency=1, required={ResourceType.BED: 1, ResourceType.DOCTOR: 1}, service_time=100)
+    # p2 arrives at 50 (waits until 100, then allocated)
+    p2 = _patient(2, arrival=50, urgency=1, required={ResourceType.BED: 1, ResourceType.DOCTOR: 1}, service_time=100)
+    # p3 arrives at 500 (future arrival: after simulation stop time 100)
+    p3 = _patient(3, arrival=500, urgency=1, required={ResourceType.BED: 1, ResourceType.DOCTOR: 1}, service_time=100)
+
+    eng = Engine(config, [p1, p2, p3], fifo_strategy, seed=42)
+    eng.run_until(100)
+
+    assert eng.clock == 100
+    stats = eng.stats_raw()
+
+    # Only p1 and p2 have arrived by t=100; p3 arrives at t=500
+    assert stats["counts"]["arrived"] == 2
+    assert stats["counts"]["treated"] == 1        # p1 DISCHARGED
+    assert stats["counts"]["in_treatment"] == 1   # p2 IN_TREATMENT
+    assert stats["counts"]["waiting"] == 0        # p3 is not waiting yet!
+    assert stats["counts"]["interrupted"] == 0
+
+    # Arrived count equals sum of treated + in_treatment + waiting
+    assert stats["counts"]["arrived"] == (
+        stats["counts"]["treated"]
+        + stats["counts"]["in_treatment"]
+        + stats["counts"]["waiting"]
+    )
+
+    # stats['patients'] only contains arrived patients
+    patient_ids = [p["id"] for p in stats["patients"]]
+    assert patient_ids == [1, 2], f"Expected patient IDs [1, 2], got {patient_ids}"
+    assert 3 not in patient_ids
+
+    # All wait times for arrived patients must be non-negative
+    for p in stats["patients"]:
+        wait = (p["start"] if p["start"] is not None else stats["clock"]) - p["arrival"]
+        assert wait >= 0, f"Patient {p['id']} has negative wait: {wait}"

@@ -123,9 +123,12 @@ def assert_invariants(engine: "Engine") -> None:
             )
 
     # ── I7: every pending event has time >= clock ─────────────────────────
-    for event in engine._heap:
-        assert event.time >= engine.clock, (
-            f"I7: event '{event.kind}' at t={event.time} < clock={engine.clock}"
+    # Since engine._heap is a min-heap ordered by (time, kind_rank, seq),
+    # the minimum timestamp across all pending events is always at engine._heap[0].time.
+    # Therefore, checking the heap root is mathematically equivalent to checking all events.
+    if engine._heap:
+        assert engine._heap[0].time >= engine.clock, (
+            f"I7: event '{engine._heap[0].kind}' at t={engine._heap[0].time} < clock={engine.clock}"
         )
 
     # ── I8: DISCHARGED patients hold no units ────────────────────────────
